@@ -1,158 +1,120 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from io import BytesIO
-import base64
-from datetime import datetime
+import plotly.io as pio
+import yagmail
+import pdfkit
+import os
 
-st.set_page_config(layout="wide", page_title="PowerBI-style Dashboard")
+# Load data
+@st.cache_data
+def load_data():
+    df = pd.read_excel("Fill Rate_2025-06-30.xlsx", sheet_name="Base Data")
+    df['sku_level_fill_rate'] = df['sku_level_fill_rate'].str.rstrip('%').astype(float)
+    df['overall_po_fill_rate'] = df['overall_po_fill_rate'].str.rstrip('%').astype(float)
+    return df
+
+df = load_data()
+
+# Initialize session state for persistent filters
+if "filters" not in st.session_state:
+    st.session_state.filters = {
+        "manufacturer": [],
+        "category": [],
+        "subcategory": [],
+        "location": []
+    }
+
+# Sidebar Filters
+st.sidebar.title("Filters")
+
+manufacturer = st.sidebar.multiselect("Manufacturer", df["brand_name"].dropna().unique(),
+                                      default=st.session_state.filters["manufacturer"])
+category = st.sidebar.multiselect("Category", df["category_name"].dropna().unique(),
+                                  default=st.session_state.filters["category"])
+subcategory = st.sidebar.multiselect("Subcategory", df["subcategory_name"].dropna().unique(),
+                                     default=st.session_state.filters["subcategory"])
+location = st.sidebar.multiselect("Location (Warehouse/Region)", df["vendorcode"].dropna().unique(),
+                                  default=st.session_state.filters["location"])
+
+st.session_state.filters = {
+    "manufacturer": manufacturer,
+    "category": category,
+    "subcategory": subcategory,
+    "location": location
+}
+
+# Apply filters
+filtered_df = df.copy()
+if manufacturer:
+    filtered_df = filtered_df[filtered_df["brand_name"].isin(manufacturer)]
+if category:
+    filtered_df = filtered_df[filtered_df["category_name"].isin(category)]
+if subcategory:
+    filtered_df = filtered_df[filtered_df["subcategory_name"].isin(subcategory)]
+if location:
+    filtered_df = filtered_df[filtered_df["vendorcode"].isin(location)]
+
+# KPIs
 st.title("📊 Fill Rate Dashboard")
+col1, col2 = st.columns(2)
+col1.metric("Average QFR", f"{filtered_df['sku_level_fill_rate'].mean():.2f}%")
+col2.metric("Average LFR", f"{filtered_df['overall_po_fill_rate'].mean():.2f}%")
 
-uploaded_file = st.file_uploader("📤 Upload Excel or CSV file", type=["xlsx", "xls", "csv"])
+# Charts
+st.subheader("📦 Fill Rate by Category")
+cat_fig = px.bar(filtered_df, x="category_name", y="sku_level_fill_rate", color="category_name")
+st.plotly_chart(cat_fig, use_container_width=True)
 
-if uploaded_file is not None:
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            df_raw = pd.read_csv(uploaded_file)
-        else:
-            df_raw = pd.read_excel(uploaded_file, skiprows=3)
+st.subheader("🔍 Fill Rate by Subcategory")
+sub_fig = px.bar(filtered_df, x="subcategory_name", y="sku_level_fill_rate", color="subcategory_name")
+st.plotly_chart(sub_fig, use_container_width=True)
 
-        df = df_raw.rename(columns={
-            'Row Labels': 'Category',
-            'Sum of sku_po_qty': 'PO Qty',
-            'Sum of sku_grn_qty': 'GRN Qty',
-            'Sum of QFR': 'QFR',
-            'Sum of sku_po_line': 'PO Lines',
-            'Sum of sku_grn_line': 'GRN Lines',
-            'Sum of LFR': 'LFR',
-            'Sum of po_amount': 'PO Amount',
-            'Sum of grn_amount': 'GRN Amount',
-            'Sum of Vendor loss A/c': 'Vendor Loss',
-            'PO Date': 'PO Date',
-            'Region': 'Region',
-            'Manufacturer Name': 'Manufacturer',
-            'WH Name': 'Warehouse',
-            'Vendor Name': 'Vendor'
-        })
+st.subheader("🏭 Fill Rate by Manufacturer")
+man_fig = px.bar(filtered_df, x="brand_name", y="overall_po_fill_rate", color="brand_name")
+st.plotly_chart(man_fig, use_container_width=True)
 
-        numeric_cols = ['PO Qty', 'GRN Qty', 'QFR', 'LFR', 'PO Lines', 'GRN Lines', 'PO Amount', 'GRN Amount', 'Vendor Loss']
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+# Export chart as image
+st.subheader("📤 Export Chart")
+chart_map = {
+    "Category Chart": cat_fig,
+    "Subcategory Chart": sub_fig,
+    "Manufacturer Chart": man_fig
+}
+chart_choice = st.selectbox("Choose chart", list(chart_map.keys()))
+format_choice = st.selectbox("Format", ["PNG", "PDF"])
+if st.button("Export Chart"):
+    img_bytes = pio.to_image(chart_map[chart_choice], format=format_choice.lower(), width=1000, height=600)
+    st.download_button(f"Download {chart_choice}", data=img_bytes,
+                       file_name=f"{chart_choice.replace(' ', '_')}.{format_choice.lower()}")
 
-        df = df.dropna(subset=['Category'])
+# PDF Summary
+st.subheader("🧾 Generate PDF Summary")
+if st.button("Create PDF"):
+    html = f"""
+    <html><body>
+    <h2>Fill Rate Summary</h2>
+    <p><strong>Avg QFR:</strong> {filtered_df['sku_level_fill_rate'].mean():.2f}%</p>
+    <p><strong>Avg LFR:</strong> {filtered_df['overall_po_fill_rate'].mean():.2f}%</p>
+    </body></html>
+    """
+    with open("report.html", "w") as f:
+        f.write(html)
+    pdfkit.from_file("report.html", "summary.pdf")
+    with open("summary.pdf", "rb") as f:
+        st.download_button("Download PDF Summary", f, file_name="summary.pdf")
 
-        if 'PO Date' in df.columns:
-            df['PO Date'] = pd.to_datetime(df['PO Date'], errors='coerce')
-
-        st.sidebar.header("🔎 Filters")
-        categories = df['Category'].dropna().unique()
-        selected_categories = st.sidebar.multiselect("Select Categories", categories, default=categories)
-
-        manufacturers = df['Manufacturer'].dropna().unique() if 'Manufacturer' in df.columns else []
-        selected_manu = st.sidebar.multiselect("Select Manufacturer", manufacturers, default=manufacturers)
-
-        warehouses = df['Warehouse'].dropna().unique() if 'Warehouse' in df.columns else []
-        selected_wh = st.sidebar.multiselect("Select WH Name", warehouses, default=warehouses)
-
-        if 'Region' in df.columns:
-            regions = df['Region'].dropna().unique()
-            selected_regions = st.sidebar.multiselect("Select Regions", regions, default=regions)
-        else:
-            selected_regions = df['Region'].unique() if 'Region' in df.columns else []
-
-        if 'PO Date' in df.columns:
-            min_date = df['PO Date'].min()
-            max_date = df['PO Date'].max()
-            selected_date = st.sidebar.date_input("Select PO Date Range", [min_date, max_date])
-        else:
-            selected_date = None
-
-        filtered_df = df[df['Category'].isin(selected_categories)]
-
-        if selected_manu:
-            filtered_df = filtered_df[filtered_df['Manufacturer'].isin(selected_manu)]
-
-        if selected_wh:
-            filtered_df = filtered_df[filtered_df['Warehouse'].isin(selected_wh)]
-
-        if 'Region' in df.columns:
-            filtered_df = filtered_df[filtered_df['Region'].isin(selected_regions)]
-
-        if selected_date and isinstance(selected_date, list) and len(selected_date) == 2:
-            start, end = selected_date
-            filtered_df = filtered_df[(filtered_df['PO Date'] >= pd.to_datetime(start)) & (filtered_df['PO Date'] <= pd.to_datetime(end))]
-
-        total_po = filtered_df['PO Qty'].sum()
-        total_grn = filtered_df['GRN Qty'].sum()
-        fill_rate = (total_grn / total_po) * 100 if total_po > 0 else 0
-        avg_qfr = filtered_df['QFR'].mean() if 'QFR' in filtered_df.columns else 0
-        avg_lfr = filtered_df['LFR'].mean() if 'LFR' in filtered_df.columns else 0
-
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("📦 PO Qty", f"{int(total_po):,}")
-        col2.metric("✅ GRN Qty", f"{int(total_grn):,}")
-        col3.metric("📈 Fill Rate", f"{fill_rate:.2f}%")
-        col4.metric("📊 Total QFR", f"{avg_qfr * 100:.2f}%")
-        col5.metric("📉 Total LFR", f"{avg_lfr * 100:.2f}%")
-
-        st.subheader("📌 Fill Rate by Category")
-        df_bar = filtered_df[['Category', 'PO Qty', 'GRN Qty']].copy()
-        df_bar["Fill Rate %"] = (df_bar["GRN Qty"] / df_bar["PO Qty"]) * 100
-        fig_bar = px.bar(df_bar, x="Category", y="Fill Rate %", color="Fill Rate %", color_continuous_scale="Blues")
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-        st.subheader("📆 PO vs GRN by Date")
-        if 'PO Date' in filtered_df.columns:
-            df_date = filtered_df.groupby('PO Date')[['PO Qty', 'GRN Qty']].sum().reset_index()
-            fig_date = px.bar(df_date, x='PO Date', y=['PO Qty', 'GRN Qty'], barmode='group')
-            st.plotly_chart(fig_date, use_container_width=True)
-
-        st.subheader("🥧 GRN Distribution by Category")
-        fig_pie = px.pie(filtered_df, names="Category", values="GRN Qty", title="GRN Share by Category")
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-        st.subheader("📈 Cumulative PO vs GRN (Simulated)")
-        df_area = filtered_df.copy()
-        df_area["Cumulative PO"] = df_area["PO Qty"].cumsum()
-        df_area["Cumulative GRN"] = df_area["GRN Qty"].cumsum()
-        fig_area = px.area(df_area, x="Category", y=["Cumulative PO", "Cumulative GRN"])
-        st.plotly_chart(fig_area, use_container_width=True)
-
-        st.subheader("🏷️ Vendor and Warehouse Breakdown")
-        if 'Vendor' in filtered_df.columns and 'Warehouse' in filtered_df.columns:
-            group_df = filtered_df.groupby(['Category', 'Vendor', 'Warehouse']).agg({
-                'PO Qty': 'sum',
-                'GRN Qty': 'sum',
-                'QFR': 'mean',
-                'LFR': 'mean'
-            }).reset_index()
-            group_df['QFR'] = group_df['QFR'] * 100
-            group_df['LFR'] = group_df['LFR'] * 100
-            st.dataframe(group_df)
-
-        def to_excel(data):
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                data.to_excel(writer, index=False, sheet_name="Filtered")
-            output.seek(0)
-            return output
-
-        st.download_button("📁 Download Filtered Data (Excel)", to_excel(filtered_df), "filtered_data.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        st.subheader("🖨️ Export Bar Chart as PDF")
+# Email Section
+st.subheader("📧 Email Report")
+with st.expander("Send chart by email"):
+    recipient = st.text_input("Recipient Email")
+    subject = st.text_input("Subject", "Fill Rate Report")
+    msg = st.text_area("Message", "Find the report attached.")
+    if st.button("Send Email"):
+        pio.write_image(cat_fig, "email_chart.png", format="png")
         try:
-            import plotly.io as pio
-            fig_bar.update_layout(title_text="Fill Rate by Category")
-            pdf_bytes = pio.to_image(fig_bar, format="pdf", engine="kaleido")
-            b64_pdf = base64.b64encode(pdf_bytes).decode()
-            href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="fill_rate_chart.pdf">📄 Download Bar Chart PDF</a>'
-            st.markdown(href, unsafe_allow_html=True)
+            yag = yagmail.SMTP("your_email@gmail.com", "your_app_password")
+            yag.send(to=recipient, subject=subject, contents=msg, attachments="email_chart.png")
+            st.success("Email sent successfully!")
         except Exception as e:
-            st.warning(f"PDF export failed: {e}")
-
-    except Exception as e:
-        st.error(f"⚠️ Error loading file: {e}")
-else:
-    st.info("⬆️ Upload Excel or CSV file to begin.")
+            st.error(f"Failed to send email: {e}")
