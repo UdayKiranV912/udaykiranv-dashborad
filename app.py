@@ -3,8 +3,12 @@ import pandas as pd
 import plotly.express as px
 from xhtml2pdf import pisa
 import io
+
 st.set_page_config(page_title="Fill Rate Dashboard", layout="wide")
-uploaded_file = st.sidebar.file_uploader("Upload Excel File", type=["xlsx"])
+
+uploaded_file = st.sidebar.file_uploader(" Upload Excel File", type=["xlsx"])
+
+@st.cache_data
 def load_data(file):
     df = pd.read_excel(file, sheet_name="Base Data")
     df['sku_level_fill_rate'] = df['sku_level_fill_rate'].str.rstrip('%').astype(float)
@@ -23,14 +27,21 @@ if "filters" not in st.session_state:
         "subcategory": [], "location": []
     }
 
-manufacturer = st.sidebar.multiselect("Manufacturer", df["manufacturer_name"].dropna().unique(),
-                                      default=st.session_state.filters["manufacturer"])
-category = st.sidebar.multiselect("Category", df["category_name"].dropna().unique(),
-                                  default=st.session_state.filters["category"])
-subcategory = st.sidebar.multiselect("Subcategory", df["subcategory_name"].dropna().unique(),
-                                     default=st.session_state.filters["subcategory"])
-location = st.sidebar.multiselect("Location", df["wh_name"].dropna().unique(),
-                                  default=st.session_state.filters["location"])
+manufacturer_options = df["manufacturer_name"].dropna().unique().tolist()
+manufacturer_default = [m for m in st.session_state.filters["manufacturer"] if m in manufacturer_options]
+manufacturer = st.sidebar.multiselect("Manufacturer", manufacturer_options, default=manufacturer_default)
+
+category_options = df["category_name"].dropna().unique().tolist()
+category_default = [c for c in st.session_state.filters["category"] if c in category_options]
+category = st.sidebar.multiselect("Category", category_options, default=category_default)
+
+subcategory_options = df["subcategory_name"].dropna().unique().tolist()
+subcategory_default = [s for s in st.session_state.filters["subcategory"] if s in subcategory_options]
+subcategory = st.sidebar.multiselect("Subcategory", subcategory_options, default=subcategory_default)
+
+location_options = df["wh_name"].dropna().unique().tolist()
+location_default = [l for l in st.session_state.filters["location"] if l in location_options]
+location = st.sidebar.multiselect("Location", location_options, default=location_default)
 
 st.session_state.filters = {
     "manufacturer": manufacturer, "category": category,
@@ -52,7 +63,10 @@ agg_cols = [
     "sku_grn_line", "overall_po_fill_rate", "po_amount", "grn_amount",
     "Vendor loss A/c"
 ]
-summary_df = filtered_df.groupby(["manufacturer_name", "category_name", "subcategory_name", "wh_name"])[agg_cols].sum().reset_index()
+
+summary_df = filtered_df.groupby([
+    "manufacturer_name", "category_name", "subcategory_name", "wh_name"
+])[agg_cols].sum().reset_index()
 
 st.title("📊 Fill Rate Dashboard")
 col1, col2 = st.columns(2)
