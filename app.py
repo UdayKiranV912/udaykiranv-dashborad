@@ -3,13 +3,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from io import BytesIO
-import plotly.io as pio
 import base64
 from datetime import datetime
 
 st.set_page_config(layout="wide", page_title="PowerBI-style Dashboard")
 st.title("📊 Fill Rate Dashboard")
-st.markdown("Upload an Excel or CSV file to explore the fill rate dashboard.")
 
 uploaded_file = st.file_uploader("📤 Upload Excel or CSV file", type=["xlsx", "xls", "csv"])
 
@@ -32,7 +30,10 @@ if uploaded_file is not None:
             'Sum of grn_amount': 'GRN Amount',
             'Sum of Vendor loss A/c': 'Vendor Loss',
             'PO Date': 'PO Date',
-            'Region': 'Region'
+            'Region': 'Region',
+            'Manufacturer Name': 'Manufacturer',
+            'WH Name': 'Warehouse',
+            'Vendor Name': 'Vendor'
         })
 
         df = df.dropna(subset=['Category'])
@@ -42,9 +43,11 @@ if uploaded_file is not None:
 
         # Filters
         st.sidebar.header("🔎 Filters")
-
         categories = df['Category'].dropna().unique()
         selected_categories = st.sidebar.multiselect("Select Categories", categories, default=categories)
+
+        manufacturers = df['Manufacturer'].dropna().unique() if 'Manufacturer' in df.columns else []
+        selected_manu = st.sidebar.selectbox("Select Manufacturer", options=manufacturers) if len(manufacturers) > 0 else None
 
         if 'Region' in df.columns:
             regions = df['Region'].dropna().unique()
@@ -61,6 +64,9 @@ if uploaded_file is not None:
 
         filtered_df = df[df['Category'].isin(selected_categories)]
 
+        if selected_manu:
+            filtered_df = filtered_df[filtered_df['Manufacturer'] == selected_manu]
+
         if 'Region' in df.columns:
             filtered_df = filtered_df[filtered_df['Region'].isin(selected_regions)]
 
@@ -68,26 +74,36 @@ if uploaded_file is not None:
             start, end = selected_date
             filtered_df = filtered_df[(filtered_df['PO Date'] >= pd.to_datetime(start)) & (filtered_df['PO Date'] <= pd.to_datetime(end))]
 
+        if selected_categories:
+            st.markdown(f"<h1 style='text-align:center; color:#0e4d92;'>{', '.join(selected_categories)}</h1>", unsafe_allow_html=True)
+
+        # KPIs
         total_po = filtered_df['PO Qty'].sum()
         total_grn = filtered_df['GRN Qty'].sum()
         fill_rate = (total_grn / total_po) * 100 if total_po > 0 else 0
+        sum_qfr = filtered_df['QFR'].sum() if 'QFR' in filtered_df.columns else 0
+        sum_lfr = filtered_df['LFR'].sum() if 'LFR' in filtered_df.columns else 0
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("📦 PO Qty", f"{int(total_po):,}")
         col2.metric("✅ GRN Qty", f"{int(total_grn):,}")
         col3.metric("📈 Fill Rate", f"{fill_rate:.2f}%")
+        col4.metric("📊 Total QFR", f"{sum_qfr:.2f}")
+        col5.metric("📉 Total LFR", f"{sum_lfr:.2f}")
 
-        # Charts
+        # Bar Chart
         st.subheader("📌 Fill Rate by Category")
         df_bar = filtered_df[['Category', 'PO Qty', 'GRN Qty']].copy()
         df_bar["Fill Rate %"] = (df_bar["GRN Qty"] / df_bar["PO Qty"]) * 100
         fig_bar = px.bar(df_bar, x="Category", y="Fill Rate %", color="Fill Rate %", color_continuous_scale="Blues")
         st.plotly_chart(fig_bar, use_container_width=True)
 
+        # Pie Chart
         st.subheader("🥧 GRN Distribution by Category")
         fig_pie = px.pie(filtered_df, names="Category", values="GRN Qty", title="GRN Share by Category")
         st.plotly_chart(fig_pie, use_container_width=True)
 
+        # Area Chart
         st.subheader("📈 Cumulative PO vs GRN (Simulated)")
         df_area = filtered_df.copy()
         df_area["Cumulative PO"] = df_area["PO Qty"].cumsum()
@@ -95,10 +111,18 @@ if uploaded_file is not None:
         fig_area = px.area(df_area, x="Category", y=["Cumulative PO", "Cumulative GRN"])
         st.plotly_chart(fig_area, use_container_width=True)
 
-        st.subheader("📋 Summary Table")
-        st.dataframe(df_bar.style.format({"PO Qty": "{:,}", "GRN Qty": "{:,}", "Fill Rate %": "{:.2f}"}))
+        # Grouped Display
+        st.subheader("🏷️ Vendor and Warehouse Breakdown")
+        if 'Vendor' in filtered_df.columns and 'Warehouse' in filtered_df.columns:
+            group_df = filtered_df.groupby(['Category', 'Vendor', 'Warehouse']).agg({
+                'PO Qty': 'sum',
+                'GRN Qty': 'sum',
+                'QFR': 'sum',
+                'LFR': 'sum'
+            }).reset_index()
+            st.dataframe(group_df)
 
-        # Excel Export
+        # Download Excel
         def to_excel(data):
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -109,16 +133,17 @@ if uploaded_file is not None:
         st.download_button("📁 Download Filtered Data (Excel)", to_excel(filtered_df), "filtered_data.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # PDF Export
+        # Export PDF
         st.subheader("🖨️ Export Bar Chart as PDF")
         try:
+            import plotly.io as pio
             fig_bar.update_layout(title_text="Fill Rate by Category")
-            pdf_bytes = fig_bar.to_image(format="pdf", engine="kaleido")
+            pdf_bytes = pio.to_image(fig_bar, format="pdf", engine="kaleido")
             b64_pdf = base64.b64encode(pdf_bytes).decode()
             href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="fill_rate_chart.pdf">📄 Download Bar Chart PDF</a>'
             st.markdown(href, unsafe_allow_html=True)
         except Exception as e:
-            st.warning("PDF export failed. Make sure 'kaleido' is installed.")
+            st.warning(f"PDF export failed: {e}")
 
     except Exception as e:
         st.error(f"⚠️ Error loading file: {e}")
