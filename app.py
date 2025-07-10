@@ -72,10 +72,30 @@ if missing_cols:
 
 summary_df = filtered_df.groupby(group_cols)[agg_cols].sum().reset_index()
 
+total_sku_po_qty = filtered_df["sku_po_qty"].sum()
+total_sku_grn_qty = filtered_df["sku_grn_qty"].sum()
+total_sku_po_line = filtered_df["sku_po_line"].sum()
+total_sku_grn_line = filtered_df["sku_grn_line"].sum()
+total_po_amount = filtered_df["po_amount"].sum()
+total_grn_amount = filtered_df["grn_amount"].sum()
+total_vendor_loss = filtered_df["Vendor loss A/c"].sum() if "Vendor loss A/c" in filtered_df.columns else 0.0
+total_qfr = filtered_df["sku_level_fill_rate"].mean()
+total_lfr = filtered_df["overall_po_fill_rate"].mean()
+
 st.title("📊 Fill Rate Dashboard")
-col1, col2 = st.columns(2)
-col1.metric("Total QFR", f"{filtered_df['sku_level_fill_rate'].sum():,.2f}")
-col2.metric("Total LFR", f"{filtered_df['overall_po_fill_rate'].sum():,.2f}")
+c1, c2, c3 = st.columns(3)
+c1.metric("Total SKU PO Qty", f"{total_sku_po_qty:,.0f}")
+c2.metric("Total SKU GRN Qty", f"{total_sku_grn_qty:,.0f}")
+c3.metric("Vendor Loss A/c", f"{total_vendor_loss:,.0f}")
+
+c4, c5, c6 = st.columns(3)
+c4.metric("Total PO Lines", f"{total_sku_po_line:,.0f}")
+c5.metric("Total GRN Lines", f"{total_sku_grn_line:,.0f}")
+c6.metric("PO Amount", f"{total_po_amount:,.0f}")
+
+c7, c8 = st.columns(2)
+c7.metric("QFR (%)", f"{total_qfr:.2f}%", delta=None)
+c8.metric("LFR (%)", f"{total_lfr:.2f}%", delta=None)
 
 st.subheader("📦 QFR by Category")
 cat_fig = px.bar(summary_df, x="category_name", y="sku_level_fill_rate", color="category_name")
@@ -105,8 +125,15 @@ if st.button("Create PDF Summary"):
     html = f"""
     <html><body>
     <h2>📊 Fill Rate Summary</h2>
-    <p><strong>Total QFR:</strong> {filtered_df['sku_level_fill_rate'].sum():,.2f}</p>
-    <p><strong>Total LFR:</strong> {filtered_df['overall_po_fill_rate'].sum():,.2f}</p>
+    <p><strong>Total QFR (%):</strong> {total_qfr:.2f}</p>
+    <p><strong>Total LFR (%):</strong> {total_lfr:.2f}</p>
+    <p><strong>Total SKU PO Qty:</strong> {total_sku_po_qty:,.0f}</p>
+    <p><strong>Total SKU GRN Qty:</strong> {total_sku_grn_qty:,.0f}</p>
+    <p><strong>Total PO Lines:</strong> {total_sku_po_line:,.0f}</p>
+    <p><strong>Total GRN Lines:</strong> {total_sku_grn_line:,.0f}</p>
+    <p><strong>Total PO Amount:</strong> {total_po_amount:,.0f}</p>
+    <p><strong>Total GRN Amount:</strong> {total_grn_amount:,.0f}</p>
+    <p><strong>Vendor Loss A/c:</strong> {total_vendor_loss:,.0f}</p>
     </body></html>
     """
     pdf_file = convert_html_to_pdf(html)
