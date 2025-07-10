@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -41,13 +40,15 @@ if uploaded_file is not None:
         if 'PO Date' in df.columns:
             df['PO Date'] = pd.to_datetime(df['PO Date'], errors='coerce')
 
-        # Filters
         st.sidebar.header("🔎 Filters")
         categories = df['Category'].dropna().unique()
         selected_categories = st.sidebar.multiselect("Select Categories", categories, default=categories)
 
         manufacturers = df['Manufacturer'].dropna().unique() if 'Manufacturer' in df.columns else []
-        selected_manu = st.sidebar.selectbox("Select Manufacturer", options=manufacturers) if len(manufacturers) > 0 else None
+        selected_manu = st.sidebar.multiselect("Select Manufacturer", manufacturers, default=manufacturers)
+
+        warehouses = df['Warehouse'].dropna().unique() if 'Warehouse' in df.columns else []
+        selected_wh = st.sidebar.multiselect("Select WH Name", warehouses, default=warehouses)
 
         if 'Region' in df.columns:
             regions = df['Region'].dropna().unique()
@@ -65,7 +66,10 @@ if uploaded_file is not None:
         filtered_df = df[df['Category'].isin(selected_categories)]
 
         if selected_manu:
-            filtered_df = filtered_df[filtered_df['Manufacturer'] == selected_manu]
+            filtered_df = filtered_df[filtered_df['Manufacturer'].isin(selected_manu)]
+
+        if selected_wh:
+            filtered_df = filtered_df[filtered_df['Warehouse'].isin(selected_wh)]
 
         if 'Region' in df.columns:
             filtered_df = filtered_df[filtered_df['Region'].isin(selected_regions)]
@@ -74,10 +78,6 @@ if uploaded_file is not None:
             start, end = selected_date
             filtered_df = filtered_df[(filtered_df['PO Date'] >= pd.to_datetime(start)) & (filtered_df['PO Date'] <= pd.to_datetime(end))]
 
-        if selected_categories:
-            st.markdown(f"<h1 style='text-align:center; color:#0e4d92;'>{', '.join(selected_categories)}</h1>", unsafe_allow_html=True)
-
-        # KPIs
         total_po = filtered_df['PO Qty'].sum()
         total_grn = filtered_df['GRN Qty'].sum()
         fill_rate = (total_grn / total_po) * 100 if total_po > 0 else 0
@@ -91,19 +91,22 @@ if uploaded_file is not None:
         col4.metric("📊 Total QFR", f"{sum_qfr:.2f}")
         col5.metric("📉 Total LFR", f"{sum_lfr:.2f}")
 
-        # Bar Chart
         st.subheader("📌 Fill Rate by Category")
         df_bar = filtered_df[['Category', 'PO Qty', 'GRN Qty']].copy()
         df_bar["Fill Rate %"] = (df_bar["GRN Qty"] / df_bar["PO Qty"]) * 100
         fig_bar = px.bar(df_bar, x="Category", y="Fill Rate %", color="Fill Rate %", color_continuous_scale="Blues")
         st.plotly_chart(fig_bar, use_container_width=True)
 
-        # Pie Chart
+        st.subheader("📆 PO vs GRN by Date")
+        if 'PO Date' in filtered_df.columns:
+            df_date = filtered_df.groupby('PO Date')[['PO Qty', 'GRN Qty']].sum().reset_index()
+            fig_date = px.bar(df_date, x='PO Date', y=['PO Qty', 'GRN Qty'], barmode='group')
+            st.plotly_chart(fig_date, use_container_width=True)
+
         st.subheader("🥧 GRN Distribution by Category")
         fig_pie = px.pie(filtered_df, names="Category", values="GRN Qty", title="GRN Share by Category")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Area Chart
         st.subheader("📈 Cumulative PO vs GRN (Simulated)")
         df_area = filtered_df.copy()
         df_area["Cumulative PO"] = df_area["PO Qty"].cumsum()
@@ -111,7 +114,6 @@ if uploaded_file is not None:
         fig_area = px.area(df_area, x="Category", y=["Cumulative PO", "Cumulative GRN"])
         st.plotly_chart(fig_area, use_container_width=True)
 
-        # Grouped Display
         st.subheader("🏷️ Vendor and Warehouse Breakdown")
         if 'Vendor' in filtered_df.columns and 'Warehouse' in filtered_df.columns:
             group_df = filtered_df.groupby(['Category', 'Vendor', 'Warehouse']).agg({
@@ -122,7 +124,6 @@ if uploaded_file is not None:
             }).reset_index()
             st.dataframe(group_df)
 
-        # Download Excel
         def to_excel(data):
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -133,7 +134,6 @@ if uploaded_file is not None:
         st.download_button("📁 Download Filtered Data (Excel)", to_excel(filtered_df), "filtered_data.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # Export PDF
         st.subheader("🖨️ Export Bar Chart as PDF")
         try:
             import plotly.io as pio
