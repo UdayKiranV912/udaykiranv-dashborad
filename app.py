@@ -86,15 +86,15 @@ if uploaded_file is not None:
         total_po = filtered_df['PO Qty'].sum()
         total_grn = filtered_df['GRN Qty'].sum()
         fill_rate = (total_grn / total_po) * 100 if total_po > 0 else 0
-        sum_qfr = filtered_df['QFR'].sum() if 'QFR' in filtered_df.columns else 0
-        sum_lfr = filtered_df['LFR'].sum() if 'LFR' in filtered_df.columns else 0
+        avg_qfr = filtered_df['QFR'].mean() if 'QFR' in filtered_df.columns else 0
+        avg_lfr = filtered_df['LFR'].mean() if 'LFR' in filtered_df.columns else 0
 
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("📦 PO Qty", f"{int(total_po):,}")
         col2.metric("✅ GRN Qty", f"{int(total_grn):,}")
         col3.metric("📈 Fill Rate", f"{fill_rate:.2f}%")
-        col4.metric("📊 Total QFR", f"{sum_qfr * 100:.2f}%")
-        col5.metric("📉 Total LFR", f"{sum_lfr * 100:.2f}%")
+        col4.metric("📊 Total QFR", f"{avg_qfr * 100:.2f}%")
+        col5.metric("📉 Total LFR", f"{avg_lfr * 100:.2f}%")
 
         st.subheader("📌 Fill Rate by Category")
         df_bar = filtered_df[['Category', 'PO Qty', 'GRN Qty']].copy()
@@ -124,9 +124,11 @@ if uploaded_file is not None:
             group_df = filtered_df.groupby(['Category', 'Vendor', 'Warehouse']).agg({
                 'PO Qty': 'sum',
                 'GRN Qty': 'sum',
-                'QFR': 'sum',
-                'LFR': 'sum'
+                'QFR': 'mean',
+                'LFR': 'mean'
             }).reset_index()
+            group_df['QFR'] = group_df['QFR'] * 100
+            group_df['LFR'] = group_df['LFR'] * 100
             st.dataframe(group_df)
 
         def to_excel(data):
