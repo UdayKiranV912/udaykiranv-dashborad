@@ -5,8 +5,7 @@ from xhtml2pdf import pisa
 import io
 
 st.set_page_config(page_title="Fill Rate Dashboard", layout="wide")
-
-uploaded_file = st.sidebar.file_uploader(" Upload Excel File", type=["xlsx"])
+uploaded_file = st.sidebar.file_uploader("📂 Upload Excel File", type=["xlsx"])
 
 @st.cache_data
 def load_data(file):
@@ -63,10 +62,14 @@ agg_cols = [
     "sku_grn_line", "overall_po_fill_rate", "po_amount", "grn_amount",
     "Vendor loss A/c"
 ]
+group_cols = ["manufacturer_name", "category_name", "subcategory_name", "wh_name"]
+missing_cols = [col for col in agg_cols + group_cols if col not in filtered_df.columns]
 
-summary_df = filtered_df.groupby([
-    "manufacturer_name", "category_name", "subcategory_name", "wh_name"
-])[agg_cols].sum().reset_index()
+if missing_cols:
+    st.error(f"The following required columns are missing: {', '.join(missing_cols)}")
+    st.stop()
+
+summary_df = filtered_df.groupby(group_cols)[agg_cols].sum().reset_index()
 
 st.title("📊 Fill Rate Dashboard")
 col1, col2 = st.columns(2)
