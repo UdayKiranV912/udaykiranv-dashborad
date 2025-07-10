@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.io as pio
-import pdfkit
-import yagmail
+from xhtml2pdf import pisa
+import io
 
 st.set_page_config(page_title="Fill Rate Dashboard", layout="wide")
 
@@ -23,13 +22,14 @@ else:
     st.warning("Please upload 'Fill Rate_2025-06-30.xlsx'")
     st.stop()
 
-# Filters
+# Filter memory
 if "filters" not in st.session_state:
     st.session_state.filters = {
         "manufacturer": [], "category": [],
         "subcategory": [], "location": []
     }
 
+# Sidebar Filters
 manufacturer = st.sidebar.multiselect("Manufacturer", df["brand_name"].dropna().unique(),
                                       default=st.session_state.filters["manufacturer"])
 category = st.sidebar.multiselect("Category", df["category_name"].dropna().unique(),
@@ -44,6 +44,7 @@ st.session_state.filters = {
     "subcategory": subcategory, "location": location
 }
 
+# Apply Filters
 filtered_df = df.copy()
 if manufacturer:
     filtered_df = filtered_df[filtered_df["brand_name"].isin(manufacturer)]
@@ -73,32 +74,30 @@ st.subheader("🏭 Fill Rate by Manufacturer")
 man_fig = px.bar(filtered_df, x="brand_name", y="overall_po_fill_rate", color="brand_name")
 st.plotly_chart(man_fig, use_container_width=True)
 
-# Export chart
-st.subheader("📤 Export Chart")
-chart_map = {
-    "Category Chart": cat_fig,
-    "Subcategory Chart": sub_fig,
-    "Manufacturer Chart": man_fig
-}
-chart_choice = st.selectbox("Choose chart", list(chart_map.keys()))
-format_choice = st.selectbox("Format", ["PNG", "PDF"])
-if st.button("Export Chart"):
-    img_bytes = pio.to_image(chart_map[chart_choice], format=format_choice.lower(), width=1000, height=600)
-    st.download_button(f"Download {chart_choice}", data=img_bytes,
-                       file_name=f"{chart_choice.replace(' ', '_')}.{format_choice.lower()}")
+# CSV Export
+st.subheader("📥 Download Data")
+st.download_button("Download Filtered Data as CSV",
+                   data=filtered_df.to_csv(index=False),
+                   file_name="filtered_data.csv",
+                   mime="text/csv")
 
-# PDF Summary
+# PDF Summary using xhtml2pdf
+def convert_html_to_pdf(source_html):
+    output = io.BytesIO()
+    pisa_status = pisa.CreatePDF(source_html, dest=output)
+    return output if not pisa_status.err else None
+
 st.subheader("🧾 Generate PDF Summary")
-if st.button("Create PDF"):
+if st.button("Create PDF Summary"):
     html = f"""
     <html><body>
-    <h2>Fill Rate Summary</h2>
-    <p><strong>Avg QFR:</strong> {filtered_df['sku_level_fill_rate'].mean():.2f}%</p>
-    <p><strong>Avg LFR:</strong> {filtered_df['overall_po_fill_rate'].mean():.2f}%</p>
+    <h2>📊 Fill Rate Summary</h2>
+    <p><strong>Average QFR:</strong> {filtered_df['sku_level_fill_rate'].mean():.2f}%</p>
+    <p><strong>Average LFR:</strong> {filtered_df['overall_po_fill_rate'].mean():.2f}%</p>
     </body></html>
     """
-    with open("report.html", "w") as f:
-        f.write(html)
-    pdfkit.from_file("report.html", "summary.pdf")
-    with open("summary.pdf", "rb") as f:
-        st.download_button("Download PDF Summary", f, file_name="summary.pdf")
+    pdf_file = convert_html_to_pdf(html)
+    if pdf_file:
+        st.download_button("Download Summary PDF", pdf_file, file_name="fill_rate_summary.pdf")
+    else:
+        st.error("Failed to generate PDF")
