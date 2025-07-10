@@ -57,13 +57,14 @@ if subcategory:
 if location:
     filtered_df = filtered_df[filtered_df["wh_name"].isin(location)]
 
-agg_cols = [
+expected_cols = [
     "sku_po_qty", "sku_grn_qty", "sku_level_fill_rate", "sku_po_line",
     "sku_grn_line", "overall_po_fill_rate", "po_amount", "grn_amount",
     "Vendor loss A/c"
 ]
+agg_cols = [col for col in expected_cols if col in filtered_df.columns]
 group_cols = ["manufacturer_name", "category_name", "subcategory_name", "wh_name"]
-missing_cols = [col for col in agg_cols + group_cols if col not in filtered_df.columns]
+missing_cols = [col for col in group_cols if col not in filtered_df.columns]
 
 if missing_cols:
     st.error(f"The following required columns are missing: {', '.join(missing_cols)}")
