@@ -35,11 +35,6 @@ if uploaded_file is not None:
             'Vendor Name': 'Vendor'
         })
 
-        numeric_cols = ['PO Qty', 'GRN Qty', 'QFR', 'LFR', 'PO Lines', 'GRN Lines', 'PO Amount', 'GRN Amount', 'Vendor Loss']
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
         df = df.dropna(subset=['Category'])
 
         if 'PO Date' in df.columns:
@@ -93,8 +88,8 @@ if uploaded_file is not None:
         col1.metric("📦 PO Qty", f"{int(total_po):,}")
         col2.metric("✅ GRN Qty", f"{int(total_grn):,}")
         col3.metric("📈 Fill Rate", f"{fill_rate:.2f}%")
-        col4.metric("📊 Total QFR", f"{sum_qfr * 100:.2f}%")
-        col5.metric("📉 Total LFR", f"{sum_lfr * 100:.2f}%")
+        col4.metric("📊 Total QFR", f"{sum_qfr:.2f}")
+        col5.metric("📉 Total LFR", f"{sum_lfr:.2f}")
 
         st.subheader("📌 Fill Rate by Category")
         df_bar = filtered_df[['Category', 'PO Qty', 'GRN Qty']].copy()
