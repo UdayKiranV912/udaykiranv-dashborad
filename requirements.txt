@@ -1,6 +1,5 @@
 streamlit
 pandas
 plotly
-yagmail
-pdfkit
 openpyxl
+xhtml2pdf
