@@ -4,18 +4,17 @@ import plotly.express as px
 from fpdf import FPDF
 import io
 
-st.set_page_config(page_title="Universal Fill Rate Dashboard", layout="wide")
+st.set_page_config(page_title="Excel Power BI Dashboard", layout="wide")
 
-# File upload
+# Upload Excel
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel File", type=["xlsx", "xls"])
 
-# Cache Excel loader with openpyxl engine
 @st.cache_data
 def load_excel(file):
     excel = pd.ExcelFile(file, engine="openpyxl")
     df = pd.read_excel(file, sheet_name=excel.sheet_names[0], engine="openpyxl")
 
-    # Convert percentage columns if text
+    # Convert percentage strings to numbers
     for col in ["sku_level_fill_rate", "overall_po_fill_rate"]:
         if col in df.columns and df[col].dtype == object:
             df[col] = df[col].str.rstrip('%').astype(float)
@@ -28,30 +27,10 @@ if not uploaded_file:
 
 df, sheet_names = load_excel(uploaded_file)
 
-# Sidebar sheet selection (if multiple sheets exist)
-if len(sheet_names) > 1:
-    sheet_selected = st.sidebar.selectbox("📑 Select Sheet", sheet_names)
-    df = pd.read_excel(uploaded_file, sheet_name=sheet_selected, engine="openpyxl")
+# --- Report Section ---
+st.title("📊 Power BI–Style Fill Rate Dashboard")
 
-# Filter section
-filter_columns = {
-    "Manufacturer": "manufacturer_name",
-    "Category": "category_name",
-    "Subcategory": "subcategory_name",
-    "Location": "wh_name"
-}
-
-st.sidebar.markdown("### 🔍 Filters")
-for label, col in filter_columns.items():
-    if col in df.columns:
-        selected = st.sidebar.multiselect(label, df[col].dropna().unique().tolist())
-        if selected:
-            df = df[df[col].isin(selected)]
-
-# Title
-st.title("📊 Excel Power BI–Style Fill Rate Dashboard")
-
-# KPI Calculation
+# KPI Summary
 kpi_cols = {
     "sku_po_qty": "Total SKU PO Qty",
     "sku_grn_qty": "Total SKU GRN Qty",
@@ -82,9 +61,9 @@ if lfr is not None:
     col2.metric("LFR (%)", f"{lfr:.2f}%")
     metrics["LFR (%)"] = lfr
 
-# Charts
+# --- Charts ---
 def plot_chart(x_col, y_col, title):
-    fig = px.bar(df, x=x_col, y=y_col, color=x_col)
+    fig = px.bar(df, x=x_col, y=y_col, color=x_col, text_auto=".2f")
     st.subheader(title)
     st.plotly_chart(fig, use_container_width=True)
     return fig
@@ -92,18 +71,38 @@ def plot_chart(x_col, y_col, title):
 chart_images = {}
 
 if "sku_level_fill_rate" in df.columns:
-    for group_col in ["category_name", "subcategory_name"]:
-        if group_col in df.columns:
-            chart_images[group_col] = plot_chart(group_col, "sku_level_fill_rate", f"📦 QFR by {group_col.replace('_name','').capitalize()}")
+    if "category_name" in df.columns:
+        chart_images["category"] = plot_chart("category_name", "sku_level_fill_rate", "📦 QFR by Category")
+    if "subcategory_name" in df.columns:
+        chart_images["subcategory"] = plot_chart("subcategory_name", "sku_level_fill_rate", "📦 QFR by Subcategory")
 
 if "overall_po_fill_rate" in df.columns and "manufacturer_name" in df.columns:
-    chart_images["manufacturer_name"] = plot_chart("manufacturer_name", "overall_po_fill_rate", "🏭 LFR by Manufacturer")
+    chart_images["manufacturer"] = plot_chart("manufacturer_name", "overall_po_fill_rate", "🏭 LFR by Manufacturer")
 
-# Download filtered data
-st.subheader("📥 Download Filtered Data")
-st.download_button("Download CSV", df.to_csv(index=False), "filtered_data.csv", "text/csv")
+# --- Filter Section (AFTER Report) ---
+st.sidebar.markdown("## 🔍 Filter Data")
 
-# PDF summary
+filter_columns = {
+    "Manufacturer": "manufacturer_name",
+    "Category": "category_name",
+    "Subcategory": "subcategory_name",
+    "Location": "wh_name"
+}
+
+filtered_df = df.copy()
+for label, col in filter_columns.items():
+    if col in df.columns:
+        selected = st.sidebar.selectbox(f"{label}", ["All"] + df[col].dropna().unique().tolist())
+        if selected != "All":
+            filtered_df = filtered_df[filtered_df[col] == selected]
+
+# --- Export Section ---
+st.subheader("📥 Export Options")
+
+# CSV Download
+st.download_button("⬇️ Download Filtered Data (CSV)", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
+
+# PDF Generation
 def generate_pdf(metrics, charts):
     pdf = FPDF()
     pdf.add_page()
@@ -129,8 +128,7 @@ def generate_pdf(metrics, charts):
     pdf.output(output)
     return output.getvalue()
 
-st.subheader("🧾 Download PDF Report")
-if st.button("Generate PDF Summary"):
+if st.button("🧾 Generate PDF Report"):
     try:
         pdf_bytes = generate_pdf(metrics, chart_images)
         st.download_button("📄 Download PDF", pdf_bytes, "dashboard_summary.pdf")
