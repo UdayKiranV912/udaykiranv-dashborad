@@ -1,5 +1,5 @@
-streamlit
 pandas
+streamlit
 plotly
 fpdf
-matplotlib
+openpyxl
