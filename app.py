@@ -4,7 +4,7 @@ import plotly.express as px
 from fpdf import FPDF
 import io
 
-st.set_page_config(page_title="Excel Power BI Dashboard", layout="wide")
+st.set_page_config(page_title="Excel Power BI Report", layout="wide")
 
 # Upload Excel
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel File", type=["xlsx", "xls"])
@@ -12,109 +12,83 @@ uploaded_file = st.sidebar.file_uploader("📂 Upload Excel File", type=["xlsx",
 @st.cache_data
 def load_excel(file):
     excel = pd.ExcelFile(file, engine="openpyxl")
-    df = pd.read_excel(file, sheet_name=excel.sheet_names[0], engine="openpyxl")
-
-    # Convert percentage strings to numbers
-    for col in ["sku_level_fill_rate", "overall_po_fill_rate"]:
-        if col in df.columns and df[col].dtype == object:
-            df[col] = df[col].str.rstrip('%').astype(float)
-
-    return df, excel.sheet_names
+    return excel
 
 if not uploaded_file:
     st.warning("Please upload an Excel file to continue.")
     st.stop()
 
-df, sheet_names = load_excel(uploaded_file)
+excel = load_excel(uploaded_file)
 
-# --- Report Section ---
-st.title("📊 Power BI–Style Fill Rate Dashboard")
+# Select sheet
+sheet_name = st.sidebar.selectbox("📑 Select Sheet", excel.sheet_names)
+df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl")
 
-# KPI Summary
-kpi_cols = {
-    "sku_po_qty": "Total SKU PO Qty",
-    "sku_grn_qty": "Total SKU GRN Qty",
-    "sku_po_line": "Total PO Lines",
-    "sku_grn_line": "Total GRN Lines",
-    "po_amount": "PO Amount",
-    "grn_amount": "GRN Amount",
-    "Vendor loss A/c": "Vendor Loss A/c",
-}
+# Clean dataframe: drop fully empty columns
+df = df.dropna(axis=1, how="all")
 
-metrics = {}
-col1, col2, col3 = st.columns(3)
-for i, (col, label) in enumerate(kpi_cols.items()):
-    if col in df.columns:
-        value = df[col].sum()
-        metrics[label] = value
-        [col1, col2, col3][i % 3].metric(label, f"{value:,.0f}")
+st.title(f"📊 Power BI–Style Dashboard ({sheet_name})")
 
-# Fill Rate KPIs
-qfr = df["sku_level_fill_rate"].mean() if "sku_level_fill_rate" in df.columns else None
-lfr = df["overall_po_fill_rate"].mean() if "overall_po_fill_rate" in df.columns else None
+# --- Filters ---
+filterable_cols = [col for col in df.columns if df[col].nunique() < 25 and df[col].dtype == object]
+filtered_df = df.copy()
 
-col1, col2 = st.columns(2)
-if qfr is not None:
-    col1.metric("QFR (%)", f"{qfr:.2f}%")
-    metrics["QFR (%)"] = qfr
-if lfr is not None:
-    col2.metric("LFR (%)", f"{lfr:.2f}%")
-    metrics["LFR (%)"] = lfr
+st.sidebar.markdown("## 🔍 Filters")
+for col in filterable_cols:
+    options = ["All"] + sorted(df[col].dropna().unique().tolist())
+    choice = st.sidebar.selectbox(f"{col}", options)
+    if choice != "All":
+        filtered_df = filtered_df[filtered_df[col] == choice]
+
+# --- KPIs ---
+st.subheader("📌 Key Metrics")
+num_cols = filtered_df.select_dtypes(include="number").columns.tolist()
+
+if len(num_cols) > 0:
+    col1, col2, col3 = st.columns(3)
+    metrics = {}
+    for i, col in enumerate(num_cols[:6]):  # show first 6 metrics
+        value = filtered_df[col].sum()
+        metrics[col] = value
+        [col1, col2, col3][i % 3].metric(col, f"{value:,.2f}")
+else:
+    st.info("No numeric columns found to show KPIs.")
 
 # --- Charts ---
-def plot_chart(x_col, y_col, title):
-    fig = px.bar(df, x=x_col, y=y_col, color=x_col, text_auto=".2f")
-    st.subheader(title)
-    st.plotly_chart(fig, use_container_width=True)
-    return fig
+st.subheader("📊 Visualizations")
 
 chart_images = {}
 
-if "sku_level_fill_rate" in df.columns:
-    if "category_name" in df.columns:
-        chart_images["category"] = plot_chart("category_name", "sku_level_fill_rate", "📦 QFR by Category")
-    if "subcategory_name" in df.columns:
-        chart_images["subcategory"] = plot_chart("subcategory_name", "sku_level_fill_rate", "📦 QFR by Subcategory")
+# Bar chart (numeric by category columns)
+cat_cols = [c for c in df.columns if df[c].dtype == object and df[c].nunique() < 20]
 
-if "overall_po_fill_rate" in df.columns and "manufacturer_name" in df.columns:
-    chart_images["manufacturer"] = plot_chart("manufacturer_name", "overall_po_fill_rate", "🏭 LFR by Manufacturer")
+for cat in cat_cols[:3]:  # limit to 3 for clarity
+    for num in num_cols[:1]:  # first numeric col
+        fig = px.bar(filtered_df, x=cat, y=num, color=cat, text_auto=".2f")
+        st.plotly_chart(fig, use_container_width=True)
+        chart_images[f"{cat}_{num}_bar"] = fig
 
-# --- Filter Section (AFTER Report) ---
-st.sidebar.markdown("## 🔍 Filter Data")
-
-filter_columns = {
-    "Manufacturer": "manufacturer_name",
-    "Category": "category_name",
-    "Subcategory": "subcategory_name",
-    "Location": "wh_name"
-}
-
-filtered_df = df.copy()
-for label, col in filter_columns.items():
-    if col in df.columns:
-        selected = st.sidebar.selectbox(f"{label}", ["All"] + df[col].dropna().unique().tolist())
-        if selected != "All":
-            filtered_df = filtered_df[filtered_df[col] == selected]
+# Pie chart
+if len(cat_cols) > 0 and len(num_cols) > 0:
+    fig = px.pie(filtered_df, names=cat_cols[0], values=num_cols[0], title=f"{num_cols[0]} by {cat_cols[0]}")
+    st.plotly_chart(fig, use_container_width=True)
+    chart_images[f"{cat_cols[0]}_{num_cols[0]}_pie"] = fig
 
 # --- Export Section ---
 st.subheader("📥 Export Options")
 
-# CSV Download
 st.download_button("⬇️ Download Filtered Data (CSV)", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
 
-# PDF Generation
+# PDF Summary
 def generate_pdf(metrics, charts):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "📊 Fill Rate Summary", ln=True, align="C")
+    pdf.cell(190, 10, "📊 Excel Report Summary", ln=True, align="C")
     pdf.set_font("Arial", "", 12)
 
     for label, value in metrics.items():
-        if isinstance(value, float):
-            pdf.cell(190, 10, f"{label}: {value:,.2f}", ln=True)
-        else:
-            pdf.cell(190, 10, f"{label}: {value:,}", ln=True)
+        pdf.cell(190, 10, f"{label}: {value:,.2f}", ln=True)
 
     for name, fig in charts.items():
         img_bytes = fig.to_image(format="png")
