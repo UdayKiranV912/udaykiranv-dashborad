@@ -9,13 +9,13 @@ st.set_page_config(page_title="Universal Fill Rate Dashboard", layout="wide")
 # File upload
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel File", type=["xlsx", "xls"])
 
-# Cache Excel loader
+# Cache Excel loader with openpyxl engine
 @st.cache_data
 def load_excel(file):
-    excel = pd.ExcelFile(file)
-    df = pd.read_excel(file, sheet_name=excel.sheet_names[0])
+    excel = pd.ExcelFile(file, engine="openpyxl")
+    df = pd.read_excel(file, sheet_name=excel.sheet_names[0], engine="openpyxl")
 
-    # Convert percentage columns
+    # Convert percentage columns if text
     for col in ["sku_level_fill_rate", "overall_po_fill_rate"]:
         if col in df.columns and df[col].dtype == object:
             df[col] = df[col].str.rstrip('%').astype(float)
@@ -31,7 +31,7 @@ df, sheet_names = load_excel(uploaded_file)
 # Sidebar sheet selection (if multiple sheets exist)
 if len(sheet_names) > 1:
     sheet_selected = st.sidebar.selectbox("📑 Select Sheet", sheet_names)
-    df = pd.read_excel(uploaded_file, sheet_name=sheet_selected)
+    df = pd.read_excel(uploaded_file, sheet_name=sheet_selected, engine="openpyxl")
 
 # Filter section
 filter_columns = {
